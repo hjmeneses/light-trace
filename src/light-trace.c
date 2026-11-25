@@ -318,19 +318,11 @@ static uint32_t hue_color(float hue, float value)
 	// HSV con saturación 0.8 a 0xAABBGGRR
 	float h = (hue - floorf(hue)) * 6.0f;
 	float c = value * 0.8f, x = c * (1.0f - fabsf(fmodf(h, 2.0f) - 1.0f)), m = value - c;
-	float r, g, b;
-	if (h < 1)
-		r = c, g = x, b = 0;
-	else if (h < 2)
-		r = x, g = c, b = 0;
-	else if (h < 3)
-		r = 0, g = c, b = x;
-	else if (h < 4)
-		r = 0, g = x, b = c;
-	else if (h < 5)
-		r = x, g = 0, b = c;
-	else
-		r = c, g = 0, b = x;
+	// Por sector de 60°: qué canal lleva c, cuál x y cuál 0
+	const int sector = h < 6.0f ? (int)h : 5;
+	static const int which[6][3] = {{0, 1, 2}, {1, 0, 2}, {2, 0, 1}, {2, 1, 0}, {1, 2, 0}, {0, 2, 1}};
+	const float level[3] = {c, x, 0.0f}; // 0 = c, 1 = x, 2 = 0
+	float r = level[which[sector][0]], g = level[which[sector][1]], b = level[which[sector][2]];
 	uint32_t R = (uint32_t)((r + m) * 255.0f + 0.5f), G = (uint32_t)((g + m) * 255.0f + 0.5f),
 		 B = (uint32_t)((b + m) * 255.0f + 0.5f);
 	return 0xFF000000u | (B << 16) | (G << 8) | R;
