@@ -6,7 +6,23 @@ Filtro para **OBS Studio** que traza los contornos de una imagen o un texto y ha
 
 *[English below](#english)*
 
-> **En desarrollo.** Primera versión completa: luz con núcleo, estela, resplandor y temblor eléctrico, con sentido, arranque y huecos configurables. Se controla desde el [dock de shaders](https://github.com/hjmeneses/obs-shader-dock).
+![Light Trace sobre el texto STREAMING: con la fuente visible, con la fuente atenuada y en modo eléctrico](images/light-trace.png)
+
+<sub>Capturas del filtro en OBS sobre una fuente de texto: la luz a medio recorrido con la fuente visible, con la fuente atenuada, y con el temblor eléctrico. / Captures from OBS: halfway through with the source visible, with the source dimmed, and with electric jitter.</sub>
+
+## Descarga e instalación
+
+Descarga el último [release](https://github.com/hjmeneses/light-trace/releases/latest) (compilado para OBS 33):
+
+- **Windows:** con OBS cerrado, descomprime el `.zip` en `C:\ProgramData\obs-studio\plugins`.
+- **Ubuntu:** `sudo apt install ./light-trace-<versión>-x86_64-linux-gnu.deb`.
+- **macOS:** instala el `.pkg`.
+
+Luego, en una fuente de imagen o texto: **Filtros → + → Light Trace** (en español, **Trazo de luz**).
+
+Para dispararlo con ▶ y mover el progreso sin abrir las propiedades, usa el dock [Shader Dock](https://github.com/hjmeneses/shader-dock) (nativo) o [obs-shader-dock](https://github.com/hjmeneses/obs-shader-dock) (de navegador).
+
+> ¿Solo quieres algo rápido sin instalar un plugin? [obs-modern-tv](https://github.com/hjmeneses/obs-modern-tv) tiene `trazo-de-luz.shader` para obs-shaderfilter. Este plugin es la versión completa: sigue cada contorno en orden, letra por letra y con sus huecos, en lugar de barrer la imagen.
 
 ## Cómo funciona
 
@@ -52,7 +68,9 @@ Igual que la [plantilla oficial de plugins de OBS](https://github.com/obsproject
 
 An OBS Studio filter that traces the outlines of an image or text source and runs a line of light along each one, like After Effects' Vegas: every letter gets its own light, and so do the holes in letters such as A, R or O.
 
-**Work in progress.** First complete version: core, trail, glow and electric jitter, with configurable direction, start point and holes. It can be driven from the [shader dock](https://github.com/hjmeneses/obs-shader-dock) (progress 0–100 %, loop, duration).
+Core, trail, glow and electric jitter, with configurable direction, start point and holes. It can be driven from [Shader Dock](https://github.com/hjmeneses/shader-dock) (native) or [obs-shader-dock](https://github.com/hjmeneses/obs-shader-dock) (browser): play, progress 0–100 %, loop, duration.
+
+**Download:** [latest release](https://github.com/hjmeneses/light-trace/releases/latest) (built for OBS 33). Windows: with OBS closed, extract the zip into `C:\ProgramData\obs-studio\plugins`. Ubuntu: `sudo apt install ./light-trace-<version>-x86_64-linux-gnu.deb`. macOS: install the `.pkg`. Then add **Filters → + → Light Trace** to an image or text source.
 
 A pixel shader can't follow an outline in order, so the filter does that part on the CPU: whenever the source changes it renders it once, reads it back, traces the closed outlines with marching squares and keeps each one as an ordered line with its position along the path. Each frame draws every outline as a thin ribbon (the core) into a texture, blurs it for the glow and adds both over the source. It works on image and text sources (GDI+ and FreeType); other sources pass through unchanged.
 
