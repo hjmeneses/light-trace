@@ -20,6 +20,11 @@ uniform float line_width;    // px
 uniform float4 core_color;
 uniform float4 glow_color;
 uniform float glow_gain;     // fuerza del resplandor, ya normalizada por el desenfoque
+uniform float start;         // punto de arranque, corrido sobre el recorrido (0 = arriba)
+uniform float time;          // s, para el temblor
+uniform float flicker;       // 0..1: parpadeo de la energía
+uniform float distortion;    // px: cuánto se sacude el núcleo hacia los lados
+uniform float energy_speed;  // velocidad del temblor
 
 uniform float2 texel;        // 1 / tamaño de la textura
 uniform float2 blur_dir;     // (1,0) o (0,1)
@@ -58,14 +63,37 @@ SpriteData VSSprite(SpriteData v_in)
 	return v_out;
 }
 
+float hash(float n)
+{
+	return frac(sin(n) * 43758.5453);
+}
+
+// Ruido de valor 1D, suave, en 0..1
+float vnoise(float x)
+{
+	float i = floor(x);
+	float f = frac(x);
+	f = f * f * (3.0 - 2.0 * f);
+	return lerp(hash(i), hash(i + 1.0), f);
+}
+
 float4 PSRibbon(RibbonData v_in) : TARGET
 {
-	float u = v_in.t.x;
-	float d = abs(v_in.t.y);
 	float len = v_in.t.z;
+	float idx = v_in.t.w;
+	float u = frac(v_in.t.x - start);
+	float s_px = v_in.t.x * len; // px a lo largo del contorno, pegado al trazo
+	float t = time * energy_speed;
+
+	// Temblor eléctrico: el núcleo se corre hacia los lados y la energía parpadea a tramos
+	float jitter = (vnoise(s_px / 9.0 + t * 7.0 + idx * 13.1) * 2.0 - 1.0) * 0.7 +
+		       (vnoise(s_px / 3.0 - t * 11.0 + idx * 5.7) * 2.0 - 1.0) * 0.3;
+	float d = abs(v_in.t.y - distortion * jitter);
+	float energy = 1.0 - flicker * (1.0 - vnoise(s_px / 14.0 - t * 9.0 + idx * 3.3)) *
+				 (0.6 + 0.4 * vnoise(t * 17.0 + idx * 7.9));
 
 	// Cuánto lleva recorrido la cabeza por delante de este punto
-	float back = head - stagger * v_in.t.w - u;
+	float back = head - stagger * idx - u;
 	if (looping > 0.5)
 		back = frac(back);
 	if (back < 0.0)
@@ -79,8 +107,8 @@ float4 PSRibbon(RibbonData v_in) : TARGET
 
 	float hw = line_width * 0.5;
 	float shape = 1.0 - smoothstep(hw - 0.5, hw + 0.5, d);
-	float core = shape * saturate(along + head_i);
-	float g = shape * (along * 1.5 + head_i * 2.0);
+	float core = shape * saturate((along + head_i) * energy);
+	float g = shape * (along * 1.5 + head_i * 2.0) * energy;
 	return float4(core_color.rgb * core, g);
 }
 

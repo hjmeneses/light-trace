@@ -63,10 +63,18 @@ with this program. If not, see <https://www.gnu.org/licenses/>
 #define S_CORE_COLOR "core_color"
 #define S_GLOW_COLOR "glow_color"
 #define S_EXPAND "expand"
+#define S_DIRECTION "direction"
+#define S_HOLES "holes"
+#define S_START "start"
+#define S_FLICKER "flicker"
+#define S_DISTORTION "distortion"
+#define S_ENERGY_SPEED "energy_speed"
 
 #define BLUR_TAPS 32 // muestras por lado en el shader
 
 enum { FROM_ALPHA = 0, FROM_BRIGHTNESS = 1 };
+enum { DIR_CLOCKWISE = 0, DIR_COUNTERCLOCKWISE = 1 };
+enum { HOLES_OPPOSITE = 0, HOLES_SAME = 1, HOLES_NONE = 2 };
 
 struct light_trace {
 	obs_source_t *context;
@@ -84,9 +92,13 @@ struct light_trace {
 	// Animación
 	bool auto_play;
 	float duration;
-	float progress;
+	float progress; // 0..100, como los shaders que controla el dock
 	float stagger;
 	float clock; // 0..1 en bucle
+	float time;  // s, para el temblor
+	int direction;
+	int holes;
+	float start;
 
 	// Luz
 	float trail;
@@ -98,6 +110,10 @@ struct light_trace {
 	struct vec4 glow_color;
 	bool expand;
 
+	// Temblor eléctrico
+	float flicker;
+	float distortion;
+	float energy_speed;
 	gs_effect_t *effect;
 	gs_texrender_t *capture;
 	gs_stagesurf_t *stage;
@@ -148,10 +164,10 @@ static void attach_parent(struct light_trace *lt, obs_source_t *parent)
 
 /* ------------------------------------------------------------------ medidas */
 
-// Medio ancho de la cinta: el núcleo y un px de suavizado
+// Medio ancho de la cinta: el núcleo, lo que se sacude y un px de suavizado
 static float ribbon_half_width(const struct light_trace *lt)
 {
-	return lt->line_width * 0.5f + 1.5f;
+	return lt->line_width * 0.5f + lt->distortion + 1.5f;
 }
 
 static float glow_sigma(const struct light_trace *lt)
@@ -204,10 +220,21 @@ static void lt_update(void *data, obs_data_t *settings)
 	lt->progress = (float)obs_data_get_double(settings, S_PROGRESS);
 	lt->stagger = (float)obs_data_get_double(settings, S_STAGGER);
 
+	// Lo que cambia la geometría de las cintas
 	float line_width = (float)obs_data_get_double(settings, S_LINE_WIDTH);
-	if (line_width != lt->line_width)
+	float distortion = (float)obs_data_get_double(settings, S_DISTORTION);
+	int direction = (int)obs_data_get_int(settings, S_DIRECTION);
+	int holes = (int)obs_data_get_int(settings, S_HOLES);
+	if (line_width != lt->line_width || distortion != lt->distortion || direction != lt->direction ||
+	    holes != lt->holes)
 		lt->ribbons_dirty = true;
 	lt->line_width = line_width;
+	lt->distortion = distortion;
+	lt->direction = direction;
+	lt->holes = holes;
+	lt->start = (float)obs_data_get_double(settings, S_START);
+	lt->flicker = (float)obs_data_get_double(settings, S_FLICKER);
+	lt->energy_speed = (float)obs_data_get_double(settings, S_ENERGY_SPEED);
 	lt->trail = (float)obs_data_get_double(settings, S_TRAIL);
 	lt->residual = (float)obs_data_get_double(settings, S_RESIDUAL);
 	lt->glow_size = (float)obs_data_get_double(settings, S_GLOW_SIZE);
@@ -277,6 +304,7 @@ static void lt_tick(void *data, float seconds)
 			os_atomic_set_bool(&lt->dirty, true);
 	}
 
+	lt->time = fmodf(lt->time + seconds, 1000.0f);
 	if (lt->auto_play && lt->duration > 0.0f) {
 		lt->clock += seconds / lt->duration;
 		lt->clock -= floorf(lt->clock);
@@ -335,7 +363,20 @@ static void build_lines(struct light_trace *lt)
 /*
  * Cintas: por cada punto, dos vértices a ±r sobre la normal. La normal sale de los vecinos a
  * dos puntos de distancia (el contorno es cerrado), para suavizar los escalones del trazado.
+ *
+ * El trazador entrega los exteriores en sentido horario (en pantalla) y los huecos al revés.
+ * Para el sentido pedido basta con invertir la posición en el recorrido (s → 1 − s): el punto
+ * de arranque sigue siendo el mismo.
  */
+static bool reversed(const struct light_trace *lt, const struct lt_contour *c)
+{
+	bool ccw = lt->direction == DIR_COUNTERCLOCKWISE;
+	if (c->hole && lt->holes == HOLES_OPPOSITE)
+		ccw = !ccw;
+	bool natural_ccw = c->hole;
+	return ccw != natural_ccw;
+}
+
 static void build_ribbons(struct light_trace *lt)
 {
 	gs_vertexbuffer_destroy(lt->ribbons);
@@ -358,6 +399,7 @@ static void build_ribbons(struct light_trace *lt)
 		const struct lt_contour *c = &lt->contours.list[i];
 		const struct lt_point *p = lt->contours.points + c->first;
 		const size_t n = c->count - 1; // puntos distintos (el último repite el primero)
+		const bool rev = reversed(lt, c);
 		for (size_t k = 0; k < c->count; k++) {
 			size_t kk = k % n;
 			const struct lt_point *a = &p[(kk + n - 2) % n], *b = &p[(kk + 2) % n];
@@ -368,8 +410,9 @@ static void build_ribbons(struct light_trace *lt)
 			size_t v = (c->first + k) * 2;
 			vec3_set(&vbd->points[v], p[k].x + nx * r, p[k].y + ny * r, 0.0f);
 			vec3_set(&vbd->points[v + 1], p[k].x - nx * r, p[k].y - ny * r, 0.0f);
-			vec4_set(&tv[v], p[k].s, r, c->length, (float)i);
-			vec4_set(&tv[v + 1], p[k].s, -r, c->length, (float)i);
+			float s = rev ? 1.0f - p[k].s : p[k].s;
+			vec4_set(&tv[v], s, r, c->length, (float)i);
+			vec4_set(&tv[v + 1], s, -r, c->length, (float)i);
 		}
 	}
 	lt->ribbons = gs_vertexbuffer_create(vbd, 0);
@@ -472,7 +515,7 @@ static float head_position(const struct light_trace *lt)
 		return lt->clock;
 	// Una pasada: con progreso 1 todas las cabezas y sus estelas ya terminaron
 	float n = lt->contours.num ? (float)(lt->contours.num - 1) : 0.0f;
-	return lt->progress * (1.0f + lt->trail + lt->stagger * n);
+	return lt->progress * 0.01f * (1.0f + lt->trail + lt->stagger * n);
 }
 
 // Paso 1: cintas a una textura (núcleo en rgb, aporte al resplandor en a)
@@ -496,6 +539,11 @@ static bool render_core(struct light_trace *lt, uint32_t cw, uint32_t ch, float 
 	set_float(e, "trail", lt->trail);
 	set_float(e, "residual", lt->residual);
 	set_float(e, "line_width", lt->line_width);
+	set_float(e, "start", lt->start);
+	set_float(e, "time", lt->time);
+	set_float(e, "flicker", lt->flicker);
+	set_float(e, "distortion", lt->distortion);
+	set_float(e, "energy_speed", lt->energy_speed);
 	gs_effect_set_vec4(gs_effect_get_param_by_name(e, "core_color"), &lt->core_color);
 
 	gs_blend_state_push();
@@ -507,6 +555,8 @@ static bool render_core(struct light_trace *lt, uint32_t cw, uint32_t ch, float 
 	while (gs_effect_loop(e, "Ribbon")) {
 		for (size_t i = 0; i < lt->contours.num; i++) {
 			const struct lt_contour *c = &lt->contours.list[i];
+			if (c->hole && lt->holes == HOLES_NONE)
+				continue;
 			gs_draw(GS_TRISTRIP, (uint32_t)(c->first * 2), (uint32_t)(c->count * 2));
 		}
 	}
@@ -674,10 +724,21 @@ static obs_properties_t *lt_properties(void *data)
 	obs_property_set_modified_callback(p, auto_play_changed);
 	p = obs_properties_add_float_slider(anim, S_DURATION, obs_module_text("Duration"), 0.5, 30.0, 0.1);
 	obs_property_float_set_suffix(p, " s");
-	p = obs_properties_add_float_slider(anim, S_PROGRESS, obs_module_text("Progress"), 0.0, 1.0, 0.001);
+	p = obs_properties_add_float_slider(anim, S_PROGRESS, obs_module_text("Progress"), 0.0, 100.0, 0.1);
+	obs_property_float_set_suffix(p, " %");
 	obs_property_set_long_description(p, obs_module_text("Progress.Description"));
 	p = obs_properties_add_float_slider(anim, S_STAGGER, obs_module_text("Stagger"), 0.0, 0.5, 0.01);
 	obs_property_set_long_description(p, obs_module_text("Stagger.Description"));
+	p = obs_properties_add_list(anim, S_DIRECTION, obs_module_text("Direction"), OBS_COMBO_TYPE_LIST,
+				    OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(p, obs_module_text("Direction.Clockwise"), DIR_CLOCKWISE);
+	obs_property_list_add_int(p, obs_module_text("Direction.Counterclockwise"), DIR_COUNTERCLOCKWISE);
+	p = obs_properties_add_list(anim, S_HOLES, obs_module_text("Holes"), OBS_COMBO_TYPE_LIST, OBS_COMBO_FORMAT_INT);
+	obs_property_list_add_int(p, obs_module_text("Holes.Opposite"), HOLES_OPPOSITE);
+	obs_property_list_add_int(p, obs_module_text("Holes.Same"), HOLES_SAME);
+	obs_property_list_add_int(p, obs_module_text("Holes.None"), HOLES_NONE);
+	p = obs_properties_add_float_slider(anim, S_START, obs_module_text("Start"), 0.0, 1.0, 0.01);
+	obs_property_set_long_description(p, obs_module_text("Start.Description"));
 	obs_properties_add_group(props, "group_anim", obs_module_text("Group.Animation"), OBS_GROUP_NORMAL, anim);
 
 	// Luz
@@ -695,6 +756,15 @@ static obs_properties_t *lt_properties(void *data)
 	p = obs_properties_add_bool(light, S_EXPAND, obs_module_text("Expand"));
 	obs_property_set_long_description(p, obs_module_text("Expand.Description"));
 	obs_properties_add_group(props, "group_light", obs_module_text("Group.Light"), OBS_GROUP_NORMAL, light);
+
+	// Temblor eléctrico
+	obs_properties_t *elec = obs_properties_create();
+	p = obs_properties_add_float_slider(elec, S_FLICKER, obs_module_text("Flicker"), 0.0, 1.0, 0.01);
+	obs_property_set_long_description(p, obs_module_text("Flicker.Description"));
+	p = obs_properties_add_float_slider(elec, S_DISTORTION, obs_module_text("Distortion"), 0.0, 10.0, 0.1);
+	obs_property_float_set_suffix(p, " px");
+	obs_properties_add_float_slider(elec, S_ENERGY_SPEED, obs_module_text("EnergySpeed"), 0.0, 4.0, 0.05);
+	obs_properties_add_group(props, "group_electric", obs_module_text("Group.Electric"), OBS_GROUP_NORMAL, elec);
 
 	// Contornos
 	obs_properties_t *trace = obs_properties_create();
@@ -718,7 +788,7 @@ static void lt_defaults(obs_data_t *settings)
 {
 	obs_data_set_default_bool(settings, S_AUTO_PLAY, true);
 	obs_data_set_default_double(settings, S_DURATION, 3.0);
-	obs_data_set_default_double(settings, S_PROGRESS, 0.5);
+	obs_data_set_default_double(settings, S_PROGRESS, 50.0);
 	obs_data_set_default_double(settings, S_STAGGER, 0.0);
 
 	obs_data_set_default_double(settings, S_TRAIL, 0.3);
@@ -729,6 +799,12 @@ static void lt_defaults(obs_data_t *settings)
 	obs_data_set_default_int(settings, S_CORE_COLOR, 0xFFFFFFFF);
 	obs_data_set_default_int(settings, S_GLOW_COLOR, 0xFF388CFF); // naranja (1, 0.55, 0.22)
 	obs_data_set_default_bool(settings, S_EXPAND, true);
+	obs_data_set_default_int(settings, S_DIRECTION, DIR_CLOCKWISE);
+	obs_data_set_default_int(settings, S_HOLES, HOLES_OPPOSITE);
+	obs_data_set_default_double(settings, S_START, 0.0);
+	obs_data_set_default_double(settings, S_FLICKER, 0.0);
+	obs_data_set_default_double(settings, S_DISTORTION, 0.0);
+	obs_data_set_default_double(settings, S_ENERGY_SPEED, 1.0);
 
 	obs_data_set_default_int(settings, S_CONTOUR_FROM, FROM_ALPHA);
 	obs_data_set_default_double(settings, S_THRESHOLD, 0.5);

@@ -6,7 +6,7 @@ Filtro para **OBS Studio** que traza los contornos de una imagen o un texto y ha
 
 *[English below](#english)*
 
-> **En desarrollo.** Ya corre la luz (núcleo, estela y resplandor) por cada contorno. Faltan el temblor eléctrico, el sentido y punto de arranque, y el control desde el dock.
+> **En desarrollo.** Primera versión completa: luz con núcleo, estela, resplandor y temblor eléctrico, con sentido, arranque y huecos configurables. Se controla desde el [dock de shaders](https://github.com/hjmeneses/obs-shader-dock).
 
 ## Cómo funciona
 
@@ -24,13 +24,18 @@ Funciona con fuentes de **imagen** y **texto** (GDI+ y FreeType). En otras fuent
 | Grupo | Propiedad | Qué hace |
 |---|---|---|
 | Animación | En bucle / Duración | La luz da vueltas sin parar; una vuelta dura lo indicado |
-| Animación | Progreso | Sin bucle: de 0 (no salió) a 1 (ya recorrió todo), para animarlo desde fuera |
+| Animación | Progreso | Sin bucle: de 0 % (no salió) a 100 % (ya recorrió todo), para animarlo desde fuera o desde el dock |
 | Animación | Desfase entre contornos | Cada letra arranca un poco después que la anterior, de izquierda a derecha |
+| Animación | Sentido | Horario o antihorario |
+| Animación | Huecos | Al revés del exterior (sigue el borde de la tinta), en el mismo sentido, o sin luz |
+| Animación | Punto de arranque | Dónde sale la luz en cada contorno; 0 es su punto más alto |
 | Luz | Largo de la estela | Qué fracción del contorno queda encendida detrás de la cabeza |
 | Luz | Contorno ya recorrido | Brillo tenue que deja la luz al pasar |
 | Luz | Grosor del núcleo, color del núcleo | La línea brillante |
 | Luz | Tamaño, fuerza y color del resplandor | El halo alrededor |
 | Luz | Ampliar el lienzo | Agranda la fuente unos px por lado para que el halo no se corte |
+| Temblor eléctrico | Parpadeo | La energía se corta y vuelve a tramos |
+| Temblor eléctrico | Sacudida del núcleo, velocidad | El núcleo tiembla hacia los lados |
 | Contornos | Contorno de | Transparencia (alfa) o brillo, para logos sobre fondo negro |
 | Contornos | Umbral del contorno | Dónde se corta: más bajo engorda el contorno, más alto lo adelgaza |
 | Contornos | Largo mínimo de un contorno | Ignora manchitas y ruido del suavizado |
@@ -47,7 +52,7 @@ Igual que la [plantilla oficial de plugins de OBS](https://github.com/obsproject
 
 An OBS Studio filter that traces the outlines of an image or text source and runs a line of light along each one, like After Effects' Vegas: every letter gets its own light, and so do the holes in letters such as A, R or O.
 
-**Work in progress.** The light (core, trail and glow) already runs along every outline; the electric flicker, direction/start options and dock control are still to come.
+**Work in progress.** First complete version: core, trail, glow and electric jitter, with configurable direction, start point and holes. It can be driven from the [shader dock](https://github.com/hjmeneses/obs-shader-dock) (progress 0–100 %, loop, duration).
 
 A pixel shader can't follow an outline in order, so the filter does that part on the CPU: whenever the source changes it renders it once, reads it back, traces the closed outlines with marching squares and keeps each one as an ordered line with its position along the path. Each frame draws every outline as a thin ribbon (the core) into a texture, blurs it for the glow and adds both over the source. It works on image and text sources (GDI+ and FreeType); other sources pass through unchanged.
 
