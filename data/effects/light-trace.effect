@@ -1,0 +1,138 @@
+// Light Trace: la luz que recorre los contornos.
+//
+// "Ribbon" dibuja cada contorno como una cinta angosta (tira de triángulos). Cada vértice lleva
+//   t.x = posición en el recorrido (0..1), t.y = distancia al contorno (px, con signo),
+//   t.z = largo del contorno (px), t.w = número de contorno (de izquierda a derecha).
+//   Sale rgb = núcleo, a = cuánto resplandor aporta ese punto (puede pasar de 1).
+// "BlurH"/"BlurV" desenfocan el canal a (gaussiano separable) para el resplandor.
+// "Composite" junta núcleo y resplandor; se suma sobre la fuente.
+
+uniform float4x4 ViewProj;
+uniform texture2d image;
+uniform texture2d glow;
+
+uniform float head;          // posición de la cabeza (sin desfase)
+uniform float looping;       // 1 = en bucle (la estela da la vuelta), 0 = una pasada
+uniform float stagger;       // desfase entre contornos (fracción del recorrido)
+uniform float trail;         // largo de la estela (fracción del contorno)
+uniform float residual;      // brillo del contorno ya recorrido
+uniform float line_width;    // px
+uniform float4 core_color;
+uniform float4 glow_color;
+uniform float glow_gain;     // fuerza del resplandor, ya normalizada por el desenfoque
+
+uniform float2 texel;        // 1 / tamaño de la textura
+uniform float2 blur_dir;     // (1,0) o (0,1)
+uniform float sigma;         // px
+uniform float blur_step;     // px entre muestras
+
+sampler_state linear_clamp {
+	Filter   = Linear;
+	AddressU = Clamp;
+	AddressV = Clamp;
+};
+
+struct RibbonData {
+	float4 pos : POSITION;
+	float4 t   : TEXCOORD0;
+};
+
+struct SpriteData {
+	float4 pos : POSITION;
+	float2 uv  : TEXCOORD0;
+};
+
+RibbonData VSRibbon(RibbonData v_in)
+{
+	RibbonData v_out;
+	v_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	v_out.t   = v_in.t;
+	return v_out;
+}
+
+SpriteData VSSprite(SpriteData v_in)
+{
+	SpriteData v_out;
+	v_out.pos = mul(float4(v_in.pos.xyz, 1.0), ViewProj);
+	v_out.uv  = v_in.uv;
+	return v_out;
+}
+
+float4 PSRibbon(RibbonData v_in) : TARGET
+{
+	float u = v_in.t.x;
+	float d = abs(v_in.t.y);
+	float len = v_in.t.z;
+
+	// Cuánto lleva recorrido la cabeza por delante de este punto
+	float back = head - stagger * v_in.t.w - u;
+	if (looping > 0.5)
+		back = frac(back);
+	if (back < 0.0)
+		return float4(0.0, 0.0, 0.0, 0.0);
+
+	float tr = max(trail, 1e-4);
+	float along = back < tr ? pow(saturate(1.0 - back / tr), 1.5) : 0.0;
+	along = max(along, residual);
+	// La cabeza: un punto más intenso que se apaga en unos pocos px
+	float head_i = exp(-back * len / max(line_width * 3.0, 5.0));
+
+	float hw = line_width * 0.5;
+	float shape = 1.0 - smoothstep(hw - 0.5, hw + 0.5, d);
+	float core = shape * saturate(along + head_i);
+	float g = shape * (along * 1.5 + head_i * 2.0);
+	return float4(core_color.rgb * core, g);
+}
+
+float4 blur(float2 uv)
+{
+	float total = 0.0;
+	float sum = 0.0;
+	[unroll] for (int i = -32; i <= 32; i++) {
+		float x = (float)i * blur_step;
+		float w = exp(-x * x / (2.0 * sigma * sigma));
+		sum += w * image.Sample(linear_clamp, uv + blur_dir * texel * x).a;
+		total += w;
+	}
+	return float4(0.0, 0.0, 0.0, sum / total);
+}
+
+float4 PSBlur(SpriteData v_in) : TARGET
+{
+	return blur(v_in.uv);
+}
+
+float4 PSComposite(SpriteData v_in) : TARGET
+{
+	float3 core = image.Sample(linear_clamp, v_in.uv).rgb;
+	float g = glow.Sample(linear_clamp, v_in.uv).a;
+	float3 c = core + glow_color.rgb * g * glow_gain;
+	return float4(c, saturate(max(c.r, max(c.g, c.b))));
+}
+
+technique Ribbon
+{
+	pass
+	{
+		vertex_shader = VSRibbon(v_in);
+		pixel_shader  = PSRibbon(v_in);
+	}
+}
+
+technique Blur
+{
+	pass
+	{
+		vertex_shader = VSSprite(v_in);
+		pixel_shader  = PSBlur(v_in);
+	}
+}
+
+technique Composite
+{
+	pass
+	{
+		vertex_shader = VSSprite(v_in);
+		pixel_shader  = PSComposite(v_in);
+	}
+}
