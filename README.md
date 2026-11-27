@@ -62,6 +62,13 @@ Funciona con fuentes de **imagen** y **texto** (GDI+ y FreeType). En otras fuent
 
 Igual que la [plantilla oficial de plugins de OBS](https://github.com/obsproject/obs-plugintemplate): `cmake --preset windows-x64` y `cmake --build build_x64 --config RelWithDebInfo`. Las pruebas del trazador no necesitan OBS: `tests/test_contours.c` se compila solo con `src/contours.c`.
 
+## Transparencia y uso de IA
+
+Siguiendo las [directrices de recursos de OBS](https://obsproject.com/forum/resources/) y la [política de IA de OBS Studio](https://github.com/obsproject/obs-studio/blob/master/CONTRIBUTING.md#aimachine-learning-policy):
+
+- **Asistencia de IA:** Este plugin se desarrolló con apoyo de asistentes de programación de IA para la implementación en C (trazador *marching squares* y filtro GPU), las pruebas, el CI multiplataforma y la documentación, bajo dirección, revisión y pruebas del autor.
+- **Verificación y pruebas:** Incluye pruebas unitarias independientes del trazador de contornos (`tests/test_contours.c`), compilación en CI para Windows, macOS y Ubuntu, y pruebas en vivo en OBS Studio 33.
+
 ---
 
 ## English
@@ -73,6 +80,13 @@ Core, trail, glow and electric jitter, with configurable direction, start point 
 **Download:** [latest release](https://github.com/hjmeneses/light-trace/releases/latest) (built for OBS 33). Windows: with OBS closed, extract the zip into `C:\ProgramData\obs-studio\plugins`. Ubuntu: `sudo apt install ./light-trace-<version>-x86_64-linux-gnu.deb`. macOS: install the `.pkg`. Then add **Filters → + → Light Trace** to an image or text source.
 
 A pixel shader can't follow an outline in order, so the filter does that part on the CPU: whenever the source changes it renders it once, reads it back, traces the closed outlines with marching squares and keeps each one as an ordered line with its position along the path. Each frame draws every outline as a thin ribbon (the core) into a texture, blurs it for the glow and adds both over the source. It works on image and text sources (GDI+ and FreeType); other sources pass through unchanged.
+
+### Development Transparency & AI Disclosure
+
+In compliance with the [OBS Project Resource Guidelines](https://obsproject.com/forum/resources/) and the [OBS AI/Machine Learning Policy](https://github.com/obsproject/obs-studio/blob/master/CONTRIBUTING.md#aimachine-learning-policy):
+
+- **AI Assistance:** This plugin was developed with the assistance of AI coding tools for C implementation (marching squares contour tracer and GPU filter), tests, cross-platform CI, and documentation, under the author's direction, review, and testing.
+- **Verification & Testing:** Includes standalone unit tests for the contour tracer (`tests/test_contours.c`), automated CI builds for Windows, macOS, and Ubuntu, and live testing in OBS Studio 33.
 
 ## License
 
